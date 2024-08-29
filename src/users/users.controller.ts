@@ -8,6 +8,8 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
@@ -15,14 +17,19 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/createUserDto';
 import mongoose from 'mongoose';
 import { UpdateUserDTO } from './dto/updateUserDto';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Multer } from 'multer';
 
 @Controller('users')
 export class UsersController {
   constructor(private userService: UsersService) {}
-  @Post()
-  createUser(@Body() createUserDto: CreateUserDto) {
-    //console.log(createUserDto);
-    return this.userService.createUser(createUserDto);
+  @Post('create')
+  @UseInterceptors(FileInterceptor('file'))
+  async createUser(
+    @Body() createUserDto: CreateUserDto,
+    @UploadedFile() file: Multer.File,
+  ) {
+    return this.userService.createUser(createUserDto, file);
   }
 
   @Get()

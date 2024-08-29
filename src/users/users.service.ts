@@ -4,19 +4,46 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User } from 'src/schemas/user.schema';
 import * as bcrypt from 'bcrypt';
-
+import * as AWS from 'aws-sdk';
+import { Multer } from 'multer';
 import { CreateUserDto } from './dto/createUserDto';
 import { UpdateUserDTO } from './dto/updateUserDto';
+import { ConfigService } from '@nestjs/config';
 import { UserSettings } from 'src/schemas/userSetting.schema';
 
 @Injectable()
 export class UsersService {
+  private s3: AWS.S3;
+
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(UserSettings.name)
     private userSettingModel: Model<UserSettings>,
-  ) {}
-  async createUser({ settings, password, ...CreateUserDto }: CreateUserDto) {
+    private configService: ConfigService,
+  ) {
+    this.s3 = new AWS.S3({
+      accessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
+      secretAccessKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
+    });
+  }
+
+  async uploadImageToS3(file: Multer.File): Promise<string> {
+    const uploadResult = await this.s3
+      .upload({
+        Bucket: this.configService.get<string>('AWS_S3_BUCKET_NAME'),
+        Key: `${Date.now().toString()}-${file.originalname}`,
+        Body: file.buffer,
+        // This allows the file to be publicly accessible
+        ContentType: file.mimetype,
+      })
+      .promise();
+
+    return uploadResult.Location; // This is the URL of the uploaded image
+  }
+  async createUser(
+    { settings, password, ...CreateUserDto }: CreateUserDto,
+    file: Multer.File,
+  ) {
     // Check if the username already exists
     const existingUser = await this.userModel.findOne({
       username: CreateUserDto.username,
@@ -29,6 +56,12 @@ export class UsersService {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Upload image to S3 if provided
+    let avatarUrl = null;
+    if (file) {
+      avatarUrl = await this.uploadImageToS3(file);
+    }
+
     // Handle settings if provided
     let savedSettings = null;
     if (settings) {
@@ -40,6 +73,7 @@ export class UsersService {
     const newUser = new this.userModel({
       ...CreateUserDto,
       password: hashedPassword,
+      AvatarUrl: avatarUrl,
       settings: savedSettings ? savedSettings._id : null,
     });
 
